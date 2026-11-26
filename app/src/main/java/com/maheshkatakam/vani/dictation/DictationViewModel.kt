@@ -20,6 +20,7 @@ import com.maheshkatakam.vani.core.Languages
 import com.maheshkatakam.vani.core.Modes
 import com.maheshkatakam.vani.system.Haptics
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class Phase { PERMISSION, RECORDING, PROCESSING, RESULT, ERROR }
 
@@ -260,14 +262,20 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         val task = if (voiceEdit) Task.VOICE_EDIT else Task.DICTATE
         _state.update { it.copy(phase = Phase.PROCESSING, task = task, error = null) }
         try {
-            val out = Vani.engine.processAudio(
-                wav = wav,
-                task = task,
-                style = style(),
-                ctx = context(task),
-                existing = if (voiceEdit) st.target?.editableSource else null,
-                s = settings,
-            )
+            val styleSpec = style()
+            val promptCtx = promptContext(task)
+            val cfg = settings
+            // Base64 + JSON for a few MB of audio is real work: keep it off the main thread.
+            val out = withContext(Dispatchers.Default) {
+                Vani.engine.processAudio(
+                    wav = wav,
+                    task = task,
+                    style = styleSpec,
+                    ctx = promptCtx,
+                    existing = if (voiceEdit) st.target?.editableSource else null,
+                    s = cfg,
+                )
+            }
             if (out.output.isBlank()) {
                 fail(
                     if (out.transcript.isBlank()) "I couldn't make out any words. Try again?"
@@ -303,7 +311,10 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(phase = Phase.PROCESSING, task = Task.POLISH, sourceText = text, transcript = "", error = null) }
         workJob = viewModelScope.launch {
             try {
-                val out = Vani.engine.processText(Task.POLISH, text, null, style(), context(Task.POLISH), settings)
+                val styleSpec = style()
+                val promptCtx = promptContext(Task.POLISH)
+                val cfg = settings
+                val out = withContext(Dispatchers.Default) { Vani.engine.processText(Task.POLISH, text, null, styleSpec, promptCtx, cfg) }
                 if (out.isBlank()) fail("The AI returned an empty result. Try again.")
                 else showResult("", "", out, firstResult = true)
             } catch (e: CancellationException) {
@@ -336,14 +347,19 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         workJob?.cancel()
         workJob = viewModelScope.launch {
             try {
-                val out = Vani.engine.processText(
-                    task = st.task,
-                    input = input,
-                    existing = if (st.task == Task.VOICE_EDIT) st.target?.editableSource else null,
-                    style = style(),
-                    ctx = context(st.task),
-                    s = settings,
-                )
+                val styleSpec = style()
+                val promptCtx = promptContext(st.task)
+                val cfg = settings
+                val out = withContext(Dispatchers.Default) {
+                    Vani.engine.processText(
+                        task = st.task,
+                        input = input,
+                        existing = if (st.task == Task.VOICE_EDIT) st.target?.editableSource else null,
+                        style = styleSpec,
+                        ctx = promptCtx,
+                        s = cfg,
+                    )
+                }
                 if (out.isBlank()) {
                     _state.update { it.copy(busy = false) }
                     Vani.toast("Got an empty result. Try again.", long = false)
@@ -469,7 +485,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         return StyleSpec(Modes.find(st.modeId, s.customModes), st.outputLanguage, s.script, s.englishVariant)
     }
 
-    private fun context(task: Task): PromptContext {
+    private fun promptContext(task: Task): PromptContext {
         val s = settings
         val st = state.value
         val t = st.target
