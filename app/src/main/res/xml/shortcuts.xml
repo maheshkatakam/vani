@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_mic"
+        android:shortcutId="dictate"
+        android:shortcutLongLabel="@string/shortcut_dictate_long"
+        android:shortcutShortLabel="@string/shortcut_dictate_short">
+        <intent
+            android:action="com.maheshkatakam.vani.action.DICTATE"
+            android:targetClass="com.maheshkatakam.vani.dictation.DictationActivity"
+            android:targetPackage="com.maheshkatakam.vani" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_paste"
+        android:shortcutId="clipboard"
+        android:shortcutLongLabel="@string/shortcut_clipboard_long"
+        android:shortcutShortLabel="@string/shortcut_clipboard_short">
+        <intent
+            android:action="com.maheshkatakam.vani.action.POLISH_CLIPBOARD"
+            android:targetClass="com.maheshkatakam.vani.dictation.DictationActivity"
+            android:targetPackage="com.maheshkatakam.vani" />
+    </shortcut>
+</shortcuts>
