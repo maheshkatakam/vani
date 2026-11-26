@@ -154,7 +154,7 @@ class DictationActivity : SheetActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        vm.onRetrigger()
+        vm.onRetrigger(hold = intent.getBooleanExtra(EXTRA_HOLD, false))
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

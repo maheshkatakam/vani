@@ -26,6 +26,11 @@ class HistoryStore(context: Context) {
     private val _items = MutableStateFlow(load())
     val items: StateFlow<List<HistoryItem>> = _items.asStateFlow()
 
+    /** Adds the item, or replaces the one with the same id (re-styling the same dictation). */
+    fun upsert(item: HistoryItem) = mutate { list ->
+        if (list.any { it.id == item.id }) list.map { if (it.id == item.id) item else it } else (listOf(item) + list).take(MAX)
+    }
+
     fun add(item: HistoryItem) = mutate { list ->
         val unique = if (list.any { it.id == item.id }) item.copy(id = (list.maxOf { it.id }) + 1) else item
         (listOf(unique) + list).take(MAX)

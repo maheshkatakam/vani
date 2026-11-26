@@ -301,7 +301,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         )
         Dialog.MAXLEN -> ChoiceDialog(
             title = "Longest recording",
-            options = listOf(60, 120, 300, 600).map { it to "${it / 60} min" },
+            options = listOf(60, 120, 180, 300).map { it to "${it / 60} min" },
             selected = s.maxRecordingSec,
             onPick = { v -> update { it.copy(maxRecordingSec = v) }; dialog = Dialog.NONE },
             onDismiss = { dialog = Dialog.NONE },

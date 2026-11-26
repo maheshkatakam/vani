@@ -33,7 +33,10 @@ class VaniEngine(private val keys: ApiKeyStore, private val models: ModelResolve
 
         if (s.sttProvider == Provider.GEMINI && s.llmProvider == Provider.GEMINI && keys.has(Provider.GEMINI)) {
             try {
-                return geminiOneShot(wav, task, style, ctx, existing, s)
+                val r = geminiOneShot(wav, task, style, ctx, existing, s)
+                if (r.output.isNotBlank() || r.transcript.isBlank()) return r
+                // It heard words but wrote nothing: finish with a text-only rewrite of the transcript.
+                return r.copy(output = rewrite(task, r.transcript, existing, style, ctx, s, mutableSetOf()))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

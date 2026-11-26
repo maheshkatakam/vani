@@ -100,6 +100,10 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private var workJob: Job? = null
     private var lastAudio: ByteArray? = null
     private var autoInsertDone = false
+    private var holdJob: Job? = null
+
+    /** One history entry per dictation; switching style or language updates it. */
+    private var historyId: Long? = null
 
     init {
         viewModelScope.launch {
@@ -136,12 +140,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         when (req.kind) {
             LaunchKind.DICTATE -> {
                 if (hasMic) beginRecording() else _state.update { it.copy(phase = Phase.PERMISSION) }
-                if (req.holdToTalk) {
-                    viewModelScope.launch {
-                        DictationBus.holdReleased.first { it }
-                        finishRecording()
-                    }
-                }
+                if (req.holdToTalk) watchHoldRelease()
             }
             LaunchKind.POLISH_TYPED -> polishTyped()
             LaunchKind.POLISH_TEXT -> polishText(req.text.orEmpty())
@@ -158,11 +157,24 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     /** Pressing the trigger again (power button, mapped key, tile) while the sheet is open. */
-    fun onRetrigger() {
+    fun onRetrigger(hold: Boolean = false) {
         when (state.value.phase) {
             Phase.RECORDING -> finishRecording()
-            Phase.RESULT, Phase.ERROR -> beginRecording()
+            Phase.RESULT, Phase.ERROR -> {
+                _state.update { it.copy(holdToTalk = hold) }
+                beginRecording()
+                if (hold) watchHoldRelease()
+            }
             else -> Unit
+        }
+    }
+
+    /** Hold-to-talk: stop listening as soon as the mapped button is released. */
+    private fun watchHoldRelease() {
+        holdJob?.cancel()
+        holdJob = viewModelScope.launch {
+            DictationBus.holdReleased.first { it }
+            finishRecording()
         }
     }
 
@@ -173,6 +185,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         val rec = VoiceRecorder()
         recorder = rec
         lastAudio = null
+        historyId = null
         _state.update {
             it.copy(
                 phase = Phase.RECORDING, task = Task.DICTATE, error = null, levels = EMPTY_LEVELS,
@@ -194,7 +207,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             val result: VoiceRecorder.Result? = try {
                 rec.record(
                     autoStopMs = if (state.value.holdToTalk) 0 else s.autoStopMs,
-                    maxMs = s.maxRecordingSec * 1000L,
+                    // Capped at 5 minutes so the audio fits in a single Gemini request.
+                    maxMs = s.maxRecordingSec.coerceIn(30, 300) * 1000L,
                     noSpeechTimeoutMs = 12_000,
                 )
             } catch (e: CancellationException) {
@@ -285,6 +299,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             fail("There's no text to polish.")
             return
         }
+        historyId = null
         _state.update { it.copy(phase = Phase.PROCESSING, task = Task.POLISH, sourceText = text, transcript = "", error = null) }
         workJob = viewModelScope.launch {
             try {
@@ -382,9 +397,10 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         Haptics.success(app)
         val st = state.value
         if (s.saveHistory) {
-            Vani.history.add(
+            val id = historyId ?: System.currentTimeMillis().also { historyId = it }
+            Vani.history.upsert(
                 HistoryItem(
-                    id = System.currentTimeMillis(),
+                    id = id,
                     time = System.currentTimeMillis(),
                     app = st.appLabel.orEmpty(),
                     mode = Modes.find(st.modeId, s.customModes).name,
