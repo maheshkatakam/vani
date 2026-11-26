@@ -10,10 +10,13 @@ import com.maheshkatakam.vani.access.ReplaceMode
 import com.maheshkatakam.vani.access.TargetInfo
 import com.maheshkatakam.vani.access.VaniAccessibilityService
 import com.maheshkatakam.vani.ai.Errors
+import com.maheshkatakam.vani.ai.Progress
+import com.maheshkatakam.vani.ai.Stage
 import com.maheshkatakam.vani.ai.PromptContext
 import com.maheshkatakam.vani.ai.StyleSpec
 import com.maheshkatakam.vani.ai.Task
 import com.maheshkatakam.vani.ai.TextCleanup
+import com.maheshkatakam.vani.audio.AudioClip
 import com.maheshkatakam.vani.audio.VoiceRecorder
 import com.maheshkatakam.vani.core.HistoryItem
 import com.maheshkatakam.vani.core.Languages
@@ -70,6 +73,7 @@ data class SheetState(
     val detectedLanguage: String = "",
     val output: String = "",
     val busy: Boolean = false,
+    val progress: Progress? = null,
     val error: String? = null,
     val canInsert: Boolean = false,
     val returnsResult: Boolean = false,
@@ -100,7 +104,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var recorder: VoiceRecorder? = null
     private var workJob: Job? = null
-    private var lastAudio: ByteArray? = null
+    private var lastAudio: AudioClip? = null
     private var autoInsertDone = false
     private var holdJob: Job? = null
 
@@ -184,7 +188,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         workJob?.cancel()
         recorder?.cancel()
         val s = settings
-        val rec = VoiceRecorder()
+        val rec = VoiceRecorder(app.cacheDir)
         recorder = rec
         lastAudio = null
         historyId = null
@@ -229,8 +233,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                 fail("I didn't hear anything. Try again a little closer to the mic.")
                 return@launch
             }
-            lastAudio = result.wav
-            runAudio(result.wav)
+            lastAudio = result.clip
+            runAudio(result.clip)
         }
     }
 
@@ -256,11 +260,14 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private suspend fun runAudio(wav: ByteArray) {
+    private suspend fun runAudio(clip: AudioClip) {
         val st = state.value
         val voiceEdit = st.voiceEdit && st.hasTypedText
         val task = if (voiceEdit) Task.VOICE_EDIT else Task.DICTATE
-        _state.update { it.copy(phase = Phase.PROCESSING, task = task, error = null) }
+        _state.update {
+            it.copy(phase = Phase.PROCESSING, task = task, error = null, progress = Progress(Stage.SENDING), elapsedMs = 0)
+        }
+        val ticker = startTicker()
         try {
             val styleSpec = style()
             val promptCtx = promptContext(task)
@@ -268,12 +275,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             // Base64 + JSON for a few MB of audio is real work: keep it off the main thread.
             val out = withContext(Dispatchers.Default) {
                 Vani.engine.processAudio(
-                    wav = wav,
+                    clip = clip,
                     task = task,
                     style = styleSpec,
                     ctx = promptCtx,
                     existing = if (voiceEdit) st.target?.editableSource else null,
                     s = cfg,
+                    onProgress = ::onProgress,
                 )
             }
             if (out.output.isBlank()) {
@@ -288,6 +296,31 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             throw e
         } catch (e: Exception) {
             fail(Errors.describe(e))
+        } finally {
+            ticker.cancel()
+        }
+    }
+
+    /** Called from network threads while Gemini streams; StateFlow updates are thread-safe. */
+    private fun onProgress(p: Progress) {
+        _state.update { st ->
+            val previousNote = st.progress?.note
+            when {
+                st.phase == Phase.PROCESSING ->
+                    st.copy(progress = if (p.note == null && previousNote != null) p.copy(note = previousNote) else p)
+                st.phase == Phase.RESULT && st.busy && p.draft.isNotBlank() -> st.copy(output = p.draft)
+                else -> st
+            }
+        }
+    }
+
+    private fun startTicker(): Job {
+        val t0 = SystemClock.elapsedRealtime()
+        return viewModelScope.launch {
+            while (true) {
+                _state.update { it.copy(elapsedMs = SystemClock.elapsedRealtime() - t0) }
+                delay(500)
+            }
         }
     }
 
@@ -308,19 +341,29 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         historyId = null
-        _state.update { it.copy(phase = Phase.PROCESSING, task = Task.POLISH, sourceText = text, transcript = "", error = null) }
+        _state.update {
+            it.copy(
+                phase = Phase.PROCESSING, task = Task.POLISH, sourceText = text, transcript = "", error = null,
+                progress = Progress(Stage.THINKING, 1f), elapsedMs = 0,
+            )
+        }
         workJob = viewModelScope.launch {
+            val ticker = startTicker()
             try {
                 val styleSpec = style()
                 val promptCtx = promptContext(Task.POLISH)
                 val cfg = settings
-                val out = withContext(Dispatchers.Default) { Vani.engine.processText(Task.POLISH, text, null, styleSpec, promptCtx, cfg) }
+                val out = withContext(Dispatchers.Default) {
+                    Vani.engine.processText(Task.POLISH, text, null, styleSpec, promptCtx, cfg, ::onProgress)
+                }
                 if (out.isBlank()) fail("The AI returned an empty result. Try again.")
                 else showResult("", "", out, firstResult = true)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 fail(Errors.describe(e))
+            } finally {
+                ticker.cancel()
             }
         }
     }
@@ -358,6 +401,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                         style = styleSpec,
                         ctx = promptCtx,
                         s = cfg,
+                        onProgress = ::onProgress,
                     )
                 }
                 if (out.isBlank()) {

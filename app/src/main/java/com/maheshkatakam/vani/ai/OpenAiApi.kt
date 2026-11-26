@@ -16,17 +16,25 @@ data class SttResult(val text: String, val language: String)
  */
 object OpenAiApi {
     private val JSON = "application/json; charset=utf-8".toMediaType()
-    private val WAV = "audio/wav".toMediaType()
 
     fun base(p: Provider): String = when (p) {
         Provider.GROQ -> "https://api.groq.com/openai/v1"
         else -> "https://api.openai.com/v1"
     }
 
-    suspend fun transcribe(p: Provider, key: String, model: String, wav: ByteArray, prompt: String, language: String?): SttResult {
+    suspend fun transcribe(
+        p: Provider,
+        key: String,
+        model: String,
+        audio: ByteArray,
+        mime: String,
+        fileName: String,
+        prompt: String,
+        language: String?,
+    ): SttResult {
         val form = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("model", model)
-            .addFormDataPart("file", "speech.wav", wav.toRequestBody(WAV))
+            .addFormDataPart("file", fileName, audio.toRequestBody(mime.toMediaType()))
         if (prompt.isNotBlank()) form.addFormDataPart("prompt", prompt)
         if (p == Provider.GROQ) {
             form.addFormDataPart("response_format", "verbose_json")
@@ -38,7 +46,7 @@ object OpenAiApi {
             .header("Authorization", "Bearer $key")
             .post(form.build())
             .build()
-        val raw = Http.call(p, request)
+        val raw = Http.call(p, request, model, "speech-to-text")
         val o = runCatching { JSONObject(raw) }.getOrNull() ?: return SttResult(raw.trim(), "")
         val lang = o.optString("language").ifBlank {
             o.optJSONArray("languages")?.optJSONObject(0)?.optString("code").orEmpty()
@@ -63,7 +71,7 @@ object OpenAiApi {
                 .post(body.toString().toRequestBody(JSON))
                 .build()
             try {
-                return parseResponses(Http.call(Provider.OPENAI, request))
+                return parseResponses(Http.call(Provider.OPENAI, request, model, "rewrite"))
             } catch (e: ApiException) {
                 if (e.code == 400 && effort != null && e.body.contains("reasoning", ignoreCase = true)) {
                     last = e
@@ -117,7 +125,7 @@ object OpenAiApi {
                 .post(body.toString().toRequestBody(JSON))
                 .build()
             try {
-                val root = JSONObject(Http.call(p, request))
+                val root = JSONObject(Http.call(p, request, model, "rewrite"))
                 return root.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
             } catch (e: ApiException) {
                 if (e.code == 400 && withReasoning) {
@@ -136,7 +144,7 @@ object OpenAiApi {
             .header("Authorization", "Bearer $key")
             .get()
             .build()
-        val arr = JSONObject(Http.call(p, request)).optJSONArray("data") ?: return emptyList()
+        val arr = JSONObject(Http.call(p, request, what = "list models")).optJSONArray("data") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("id")?.ifBlank { null } }
     }
 }

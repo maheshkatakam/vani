@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.maheshkatakam.vani.Vani
+import com.maheshkatakam.vani.ai.Diagnostics
 import com.maheshkatakam.vani.core.AppRule
 import com.maheshkatakam.vani.core.HistoryItem
 import com.maheshkatakam.vani.core.Mode
@@ -486,5 +487,52 @@ fun HistoryScreen(onBack: () -> Unit) {
                 }
             },
         )
+    }
+}
+
+// ------------------------------------------------------------------ Diagnostics
+
+@Composable
+fun DiagnosticsScreen(onBack: () -> Unit) {
+    val entries by Diagnostics.entries.collectAsStateWithLifecycle()
+    VaniScaffold(
+        title = "Diagnostics",
+        onBack = onBack,
+        actions = {
+            if (entries.isNotEmpty()) {
+                IconButton(onClick = {
+                    Vani.copy(Diagnostics.asText())
+                    Vani.toast("Copied. Paste it in a message to share it.", long = false)
+                }) { Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy all") }
+                IconButton(onClick = { Diagnostics.clear() }) { Icon(Icons.Filled.DeleteSweep, contentDescription = "Clear") }
+            }
+        },
+    ) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item {
+                Text(
+                    "Each AI request since Vani last started: model, how much was sent, how long the first reply and the whole " +
+                        "answer took, and the result. No keys, audio or text are recorded. Tap the copy icon to share it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (entries.isEmpty()) {
+                item { Text("Nothing yet. Try a dictation, then come back.", style = MaterialTheme.typography.bodyMedium) }
+            }
+            items(entries) { e ->
+                Card(Modifier.fillMaxWidth()) {
+                    Text(
+                        Diagnostics.format(e),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+        }
     }
 }

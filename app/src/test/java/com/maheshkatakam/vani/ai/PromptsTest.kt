@@ -68,11 +68,13 @@ class PromptsTest {
     }
 
     @Test
-    fun audioPromptAsksForJsonFields() {
+    fun audioPromptAsksForTaggedReply() {
         val u = Prompts.audioUser(Task.DICTATE, null, PromptContext())
-        assertTrue(u.contains("\"transcript\""))
-        assertTrue(u.contains("\"language\""))
-        assertTrue(u.contains("\"output\""))
+        assertTrue(u.contains("<transcript>"))
+        assertTrue(u.contains("<language>"))
+        assertTrue(u.contains("<output>"))
+        assertTrue(Prompts.system(Task.DICTATE, style(), tagged = true).contains("Inside <output>, write only the final text"))
+        assertTrue(Prompts.system(Task.DICTATE, style()).contains("Return only the final text"))
     }
 
     @Test

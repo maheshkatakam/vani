@@ -39,6 +39,48 @@ object TextCleanup {
         return out
     }
 
+    data class Tagged(val transcript: String, val language: String, val output: String)
+
+    /**
+     * Reads Gemini's <transcript>/<language>/<output> reply. Works on partial text while it streams
+     * (an unclosed tag runs to the end) and on replies that ignored the format (all of it is the output).
+     */
+    fun parseTagged(raw: String): Tagged {
+        val transcript = between(raw, "transcript")
+        val language = between(raw, "language")
+        var output = between(raw, "output")
+        if (output == null) {
+            val lastClose = listOf("</language>", "</transcript>")
+                .map { tag -> raw.lastIndexOf(tag).let { if (it < 0) -1 else it + tag.length } }
+                .maxOrNull() ?: -1
+            output = when {
+                transcript == null && language == null -> if (raw.trimStart().startsWith("<")) "" else raw
+                lastClose >= 0 && raw.indexOf("<output", lastClose) < 0 && raw.indexOf("<language", lastClose) < 0 ->
+                    raw.substring(lastClose)
+                else -> ""
+            }
+        }
+        return Tagged(
+            transcript = stripPartialTag(transcript.orEmpty()).trim(),
+            language = stripPartialTag(language.orEmpty()).trim(),
+            output = stripPartialTag(output).trim(),
+        )
+    }
+
+    private fun between(text: String, tag: String): String? {
+        val open = "<$tag>"
+        val start = text.indexOf(open)
+        if (start < 0) return null
+        val from = start + open.length
+        val end = text.indexOf("</$tag>", from)
+        return if (end < 0) text.substring(from) else text.substring(from, end)
+    }
+
+    private val partialTag = Regex("</?[a-zA-Z_]*$")
+
+    /** Drops a tag that's only half streamed in, e.g. "...done.</outp". */
+    fun stripPartialTag(text: String): String = text.replace(partialTag, "")
+
     /** Parses a JSON object even if it's wrapped in a code fence or has stray text around it. */
     fun parseJsonLoose(raw: String): JSONObject? {
         val t = raw.trim()

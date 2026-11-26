@@ -47,6 +47,16 @@ Gmail and Outlook default to ✉️ Email; WhatsApp, Telegram, Messages, Slack, 
 - **Write in → Same language I speak**: polished text in the language you spoke, in its own script (తెలుగు, हिंदी) or in Roman letters (Settings → Indian languages are written in).
 - Add the languages you speak in Settings → Languages you speak; it helps speech recognition.
 
+### Speed: picking the Gemini model
+
+Settings → AI engine → Gemini model:
+
+- **⚡ Fast (recommended)**: Gemini 3.6 Flash with minimal thinking. Quick and well written.
+- **🧠 Smartest**: Gemini 3.8 Flash. Best for tricky rewrites, but it can't turn its thinking down as far, so it's a few seconds slower.
+- **🚀 Fastest**: Gemini 3.5 Flash-Lite. Near-instant, simpler wording.
+
+While Vani works, the sheet shows the upload, what it heard, and the text as it's being written. If something is slow or failing, Settings → Diagnostics lists each request's model, size and timings; tap copy to share it.
+
 ### Vocabulary and replacements
 
 Add names and terms (your name, university, products) so they're always spelled right. Replacements turn phrases into text, e.g. "my email" → your address.
@@ -57,7 +67,8 @@ Add names and terms (your name, university, products) so they're always spelled 
 |---|---|
 | `dictation/DictationActivity` | Handles `android.intent.action.ASSIST`, which is what makes Vani selectable as the digital assistant and launchable by holding power. Shows the bottom sheet over the current app. |
 | `audio/VoiceRecorder` | 16 kHz mono recording with a small voice-activity detector: live waveform, stop on pause, trims silence before upload. |
-| `ai/VaniEngine` | Gemini fast path: one request with the audio returns `{transcript, language, output}`. Other providers: speech-to-text then rewrite. Falls back to another provider if one fails, and finds a replacement model if a model name disappears. |
+| `ai/VaniEngine` | Gemini fast path: one *streamed* request with the audio returns the transcript, the language and the polished text, which appears on screen as it's written. Other providers: speech-to-text then rewrite. Falls back to another provider if one fails, finds a replacement model if a model name disappears, and retries on Flash-Lite if a model goes quiet for 40 s. |
+| `audio/AudioEncoder` | Compresses the recording to AAC (.m4a, about 6x smaller than WAV) before upload; falls back to WAV if a provider won't take it. |
 | `ai/Prompts` | The rules (never answer the dictation, keep facts, handle self-corrections and spoken punctuation), the style and the language instructions. |
 | `access/VaniAccessibilityService` | Reads the focused text box when you start Vani, types the result back (paste at the cursor, or set text), and runs the Key mapper. |
 | `access/KeyGestureEngine` | Hold / double-press / single-press detection with volume passthrough. |

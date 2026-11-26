@@ -12,13 +12,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import kotlin.math.max
 import kotlin.math.sqrt
 
-/** Records 16 kHz mono PCM, shows a live level, detects pauses and returns a trimmed WAV. */
-class VoiceRecorder(private val sampleRate: Int = 16_000) {
+/** Records 16 kHz mono PCM, shows a live level, detects pauses and returns a trimmed clip (WAV + AAC). */
+class VoiceRecorder(private val cacheDir: File, private val sampleRate: Int = 16_000) {
 
-    class Result(val wav: ByteArray, val durationMs: Long, val hasSpeech: Boolean, val autoStopped: Boolean)
+    class Result(val clip: AudioClip, val durationMs: Long, val hasSpeech: Boolean, val autoStopped: Boolean)
 
     private val _level = MutableStateFlow(0f)
     val level: StateFlow<Float> = _level.asStateFlow()
@@ -99,11 +100,13 @@ class VoiceRecorder(private val sampleRate: Int = 16_000) {
         } else {
             0 until all.size
         }
-        val length = range.last - range.first + 1
-        val wav = Wav.encode(all, range.first, length.coerceAtLeast(0), sampleRate)
+        val length = (range.last - range.first + 1).coerceAtLeast(0)
+        val wav = Wav.encode(all, range.first, length, sampleRate)
+        val m4a = AudioEncoder.toM4a(all, range.first, length, sampleRate, cacheDir)
+        val durationMs = SystemClock.elapsedRealtime() - started
         Result(
-            wav = wav,
-            durationMs = SystemClock.elapsedRealtime() - started,
+            clip = AudioClip(wav, m4a, length * 1000L / (sampleRate * 2)),
+            durationMs = durationMs,
             hasSpeech = vad.hasMeaningfulAudio() && all.isNotEmpty(),
             autoStopped = autoStopped,
         )

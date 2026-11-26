@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.maheshkatakam.vani.BuildConfig
 import com.maheshkatakam.vani.Vani
 import com.maheshkatakam.vani.ai.Errors
+import com.maheshkatakam.vani.ai.ModelCatalog
 import com.maheshkatakam.vani.core.AppSettings
 import com.maheshkatakam.vani.core.Languages
 import com.maheshkatakam.vani.core.ModelKind
@@ -62,6 +63,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     val s by Vani.settings.state.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf(Dialog.NONE) }
     var modelDialog by remember { mutableStateOf<Pair<Provider, ModelKind>?>(null) }
+    var geminiPresetDialog by remember { mutableStateOf(false) }
     var tileMessage by remember { mutableStateOf<String?>(null) }
     val update: ((AppSettings) -> AppSettings) -> Unit = { Vani.settings.update(it) }
 
@@ -135,10 +137,20 @@ fun SettingsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             kind == ModelKind.STT -> "${p.label} speech model"
                             else -> "${p.label} writing model"
                         }
+                        val preset = if (p == Provider.GEMINI) {
+                            ModelCatalog.geminiPresets.firstOrNull { it.model == ModelCatalog.normalizeId(override) }
+                        } else {
+                            null
+                        }
                         SettingRow(
                             title = what,
-                            subtitle = if (override.isBlank()) "Automatic ($auto)" else override,
-                            onClick = { modelDialog = p to kind },
+                            subtitle = when {
+                                preset != null && override.isBlank() -> "${preset.title} · $auto"
+                                preset != null -> "${preset.title} · ${preset.model}"
+                                override.isBlank() -> "Automatic ($auto)"
+                                else -> override
+                            },
+                            onClick = { if (p == Provider.GEMINI) geminiPresetDialog = true else modelDialog = p to kind },
                         )
                     }
                 }
@@ -227,6 +239,14 @@ fun SettingsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
 
             item { SectionTitle("About") }
             item {
+                SettingRow(
+                    "Diagnostics",
+                    "Timings and errors of recent AI requests, to copy if something's slow or failing",
+                    trailing = { Chevron() },
+                    onClick = { onOpen(Routes.DIAG) },
+                )
+            }
+            item {
                 Text(
                     "Vani ${BuildConfig.VERSION_NAME}. Your voice is sent only to the AI provider you choose, only while you " +
                         "dictate. API keys are encrypted with the Android Keystore. Inspired by VoiceInk for Mac.",
@@ -309,6 +329,27 @@ fun SettingsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         Dialog.NONE -> Unit
     }
 
+    if (geminiPresetDialog) {
+        val current = ModelCatalog.normalizeId(s.modelOverride(Provider.GEMINI, ModelKind.LLM))
+        val known = ModelCatalog.geminiPresets.any { it.model == current }
+        ChoiceDialog(
+            title = "Gemini model",
+            options = ModelCatalog.geminiPresets.map { it.model to "${it.title}\n${it.subtitle}" } +
+                ("custom" to "Custom model id…" + if (!known) "\n$current" else ""),
+            selected = if (known) current else "custom",
+            onPick = { v ->
+                geminiPresetDialog = false
+                if (v == "custom") {
+                    modelDialog = Provider.GEMINI to ModelKind.LLM
+                } else {
+                    val key = AppSettings.modelKey(Provider.GEMINI, ModelKind.LLM)
+                    update { st -> st.copy(models = if (v.isBlank()) st.models - key else st.models + (key to v)) }
+                }
+            },
+            onDismiss = { geminiPresetDialog = false },
+        )
+    }
+
     modelDialog?.let { (p, kind) ->
         TextInputDialog(
             title = "Model",
@@ -316,7 +357,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
             label = "Model id (leave empty for automatic)",
             supporting = "Automatic picks the best model your key can use (now: ${Vani.models.current(p, kind)}). " +
                 "Only change this if you know the exact model id.",
-            onSave = { v ->
+            onSave = { raw ->
+                val v = ModelCatalog.normalizeId(raw)
                 val key = AppSettings.modelKey(p, kind)
                 update { st -> st.copy(models = if (v.isBlank()) st.models - key else st.models + (key to v)) }
                 modelDialog = null

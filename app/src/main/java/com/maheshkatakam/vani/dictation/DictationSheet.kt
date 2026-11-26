@@ -80,6 +80,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.maheshkatakam.vani.ai.Stage
 import com.maheshkatakam.vani.ai.Task
 import com.maheshkatakam.vani.core.Languages
 import com.maheshkatakam.vani.core.Mode
@@ -138,7 +139,7 @@ fun DictationSheet(state: SheetState, modes: List<Mode>, actions: SheetActions) 
                     when (state.phase) {
                         Phase.PERMISSION -> PermissionContent(actions)
                         Phase.RECORDING -> RecordingContent(state, modes, actions)
-                        Phase.PROCESSING -> ProcessingContent(state, modes)
+                        Phase.PROCESSING -> ProcessingContent(state, modes, actions)
                         Phase.RESULT -> ResultContent(state, modes, actions)
                         Phase.ERROR -> ErrorContent(state, actions)
                     }
@@ -176,7 +177,11 @@ private fun Header(state: SheetState, modes: List<Mode>, actions: SheetActions) 
 private fun title(state: SheetState): String = when (state.phase) {
     Phase.PERMISSION -> "Microphone needed"
     Phase.RECORDING -> if (state.voiceEdit && state.hasTypedText) "Say how to change it…" else "Listening…"
-    Phase.PROCESSING -> if (state.task == Task.POLISH) "Polishing your text…" else "Writing it up…"
+    Phase.PROCESSING -> when (state.progress?.stage) {
+        Stage.SENDING -> "Sending your voice…"
+        Stage.WRITING -> "Writing…"
+        else -> if (state.task == Task.POLISH) "Polishing your text…" else "Understanding what you said…"
+    }
     Phase.RESULT -> "Ready"
     Phase.ERROR -> "That didn't work"
 }
@@ -287,17 +292,66 @@ private fun RecordingContent(state: SheetState, modes: List<Mode>, actions: Shee
 }
 
 @Composable
-private fun ProcessingContent(state: SheetState, modes: List<Mode>) {
+private fun ProcessingContent(state: SheetState, modes: List<Mode>, actions: SheetActions) {
     val mode = modes.firstOrNull { it.id == state.modeId }
-    LinearProgressIndicator(Modifier.fillMaxWidth())
-    Spacer(Modifier.height(12.dp))
+    val p = state.progress
+    val stage = p?.stage
+    val fraction = p?.fraction ?: 0f
+    if (stage == Stage.SENDING && fraction > 0f && fraction < 1f) {
+        LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+    } else {
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+    }
+    Spacer(Modifier.height(10.dp))
+    val seconds = state.elapsedMs / 1000
+    val status = when (stage) {
+        Stage.SENDING -> if (fraction > 0f) "Uploading ${(fraction * 100).toInt()}%" else "Connecting"
+        Stage.WRITING -> "Writing"
+        else -> "Thinking"
+    }
     val target = state.appLabel?.let { " for $it" }.orEmpty()
     Text(
-        "${mode?.emoji.orEmpty()} ${mode?.name ?: "Professional"} style$target, in ${Languages.label(state.outputLanguage)}.",
-        style = MaterialTheme.typography.bodyMedium,
+        "$status · ${seconds}s · ${mode?.emoji.orEmpty()} ${mode?.name ?: "Professional"}$target → ${Languages.label(state.outputLanguage)}",
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Spacer(Modifier.height(4.dp))
+    p?.note?.let {
+        Spacer(Modifier.height(6.dp))
+        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+    }
+    if (p != null && p.heard.isNotBlank()) {
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "You said: " + p.heard.takeLast(240),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+    if (p != null && p.draft.isNotBlank()) {
+        Spacer(Modifier.height(10.dp))
+        Text(
+            p.draft,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier
+                .heightIn(max = 260.dp)
+                .verticalScroll(rememberScrollState()),
+        )
+    }
+    if (seconds >= 20 && stage != Stage.WRITING) {
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "This is taking longer than usual. Keep waiting, or for quicker results choose ⚡ Fast in Vani → Settings → AI engine → Gemini model.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = actions.onCancel) { Text("Cancel") }
+    }
 }
 
 @Composable

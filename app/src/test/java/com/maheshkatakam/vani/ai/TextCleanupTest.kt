@@ -50,4 +50,30 @@ class TextCleanupTest {
         assertNotNull(TextCleanup.parseJsonLoose("{\"a\":1}"))
         assertNull(TextCleanup.parseJsonLoose("no json here"))
     }
+
+    @Test
+    fun parsesFullTaggedReply() {
+        val t = TextCleanup.parseTagged(
+            "<transcript>\nనేను పది నిమిషాలు లేట్\n</transcript>\n<language>Telugu</language>\n<output>\nI'll be 10 minutes late.\n</output>"
+        )
+        assertEquals("నేను పది నిమిషాలు లేట్", t.transcript)
+        assertEquals("Telugu", t.language)
+        assertEquals("I'll be 10 minutes late.", t.output)
+    }
+
+    @Test
+    fun parsesWhileStreaming() {
+        assertEquals("", TextCleanup.parseTagged("<transcript>\nhello th").output)
+        assertEquals("hello th", TextCleanup.parseTagged("<transcript>\nhello th").transcript)
+        assertEquals("", TextCleanup.parseTagged("<transcript>hi</transcript>\n<langu").output)
+        assertEquals("", TextCleanup.parseTagged("<transcript>hi</transcript><language>English</language>\n<outp").output)
+        assertEquals("Hello wor", TextCleanup.parseTagged("<transcript>hi</transcript><output>\nHello wor").output)
+        assertEquals("Hello world.", TextCleanup.parseTagged("<output>\nHello world.\n</outp").output)
+    }
+
+    @Test
+    fun untaggedReplyIsAllOutput() {
+        assertEquals("Hello there.", TextCleanup.parseTagged("Hello there.").output)
+        assertEquals("Final text", TextCleanup.parseTagged("<transcript>x</transcript><language>English</language>Final text").output)
+    }
 }

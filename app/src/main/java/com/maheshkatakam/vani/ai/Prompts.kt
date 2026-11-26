@@ -40,7 +40,8 @@ data class PromptContext(
  */
 object Prompts {
 
-    fun system(task: Task, style: StyleSpec): String = buildString {
+    /** [tagged] = the answer uses the <transcript>/<language>/<output> format (Gemini audio calls). */
+    fun system(task: Task, style: StyleSpec, tagged: Boolean = false): String = buildString {
         append("You are Vani, a voice-to-writing assistant on the user's Android phone. ")
         append(
             when (task) {
@@ -51,13 +52,13 @@ object Prompts {
         )
         append("Your output goes straight into the text box they are writing in, so it must be ready to send exactly as it is.\n\n")
         append("RULES\n")
-        rules(task).forEachIndexed { i, rule -> append(i + 1).append(". ").append(rule).append('\n') }
+        rules(task, tagged).forEachIndexed { i, rule -> append(i + 1).append(". ").append(rule).append('\n') }
         append("\nSTYLE: ").append(style.mode.name.uppercase()).append('\n')
         append(style.mode.instructions.trim()).append('\n')
         append("\nLANGUAGE\n").append(languageRule(style)).append('\n')
     }
 
-    private fun rules(task: Task): List<String> {
+    private fun rules(task: Task, tagged: Boolean): List<String> {
         val rules = mutableListOf<String>()
         rules += when (task) {
             Task.DICTATE ->
@@ -83,7 +84,8 @@ object Prompts {
         rules += "Use standard written forms: \"five thirty pm\" → \"5:30 PM\", \"twenty five percent\" → \"25%\", " +
             "\"two thousand rupees\" → \"₹2,000\", \"fifty dollars\" → \"\$50\", \"john at gmail dot com\" → \"john@gmail.com\"."
         rules += "Spell names and terms from the vocabulary list exactly as listed, including where speech recognition turned them into similar-sounding words."
-        rules += "Return only the final text: no quotation marks around it, no preamble (\"Here's…\", \"Sure\"), no notes or explanations, " +
+        rules += (if (tagged) "Inside <output>, write only the final text" else "Return only the final text") +
+            ": no quotation marks around it, no preamble (\"Here's…\", \"Sure\"), no notes or explanations, " +
             "no headings and no markdown symbols such as ** or #. Separate paragraphs with a blank line. Use \"- \" bullets or " +
             "\"1.\" numbering only when there are clearly several items or steps."
         if (task == Task.DICTATE) rules += "If there is no intelligible speech, return nothing."
@@ -171,14 +173,12 @@ object Prompts {
         } else {
             append("The attached audio is the user speaking.\n\n")
         }
-        append("Return JSON with exactly these fields:\n")
-        append(
-            "- \"transcript\": a faithful, verbatim transcript of what was said, in the language(s) and script actually " +
-                "spoken (Telugu in Telugu script, Hindi in Devanagari, English in Latin letters; keep code-switching as spoken).\n"
-        )
-        append("- \"language\": the main language spoken, as an English name such as \"Telugu\" or \"English\".\n")
-        append("- \"output\": the final text, following every rule above.\n")
-        append("If there is no intelligible speech, return empty strings for all three fields.")
+        append("Reply in exactly this format and nothing else:\n")
+        append("<transcript>\nA faithful, verbatim transcript of what was said, in the language(s) and script actually spoken ")
+        append("(Telugu in Telugu script, Hindi in Devanagari, English in Latin letters; keep code-switching as spoken).\n</transcript>\n")
+        append("<language>The main language spoken, as an English name such as Telugu or English.</language>\n")
+        append("<output>\nThe final text, following every rule above.\n</output>\n")
+        append("If there is no intelligible speech, leave all three empty.")
     }
 
     private const val editTail =

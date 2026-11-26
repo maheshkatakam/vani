@@ -85,6 +85,7 @@ object Routes {
     const val VOCAB = "vocab"
     const val KEYS = "keys"
     const val HISTORY = "history"
+    const val DIAG = "diagnostics"
 }
 
 @Composable
@@ -100,6 +101,7 @@ fun VaniNav() {
         composable(Routes.VOCAB) { VocabularyScreen(onBack = back) }
         composable(Routes.KEYS) { KeyMapperScreen(onBack = back) }
         composable(Routes.HISTORY) { HistoryScreen(onBack = back) }
+        composable(Routes.DIAG) { DiagnosticsScreen(onBack = back) }
     }
 }
 
